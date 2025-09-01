@@ -1,0 +1,16 @@
+name: py-shinv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - xarray
+  - pygmt
+  - pyshtools
+  - pytest
+  - pip
+  - pip:
+      - -e .
