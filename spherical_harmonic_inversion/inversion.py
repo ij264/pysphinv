@@ -4,8 +4,14 @@ import pygmt as pg
 import xarray as xr
 import os
 from tqdm import tqdm
+import pandas as pd
 
 from .utils import index, SphericalHarmonicsUtils
+
+pg.config(MAP_FRAME_TYPE='plain')
+pg.config(FONT_ANNOT_PRIMARY="10p,Palatino-Roman,black")
+pg.config(FONT_ANNOT_SECONDARY="10p,Palatino-Roman,black")
+pg.config(FONT_LABEL="10p,Palatino-Roman,black")
 
 class InversionData:
     """Load and store observational data for spherical harmonic inversion."""
@@ -131,12 +137,12 @@ class SphericalHarmonicInversion:
         if fname:
             fig.savefig(fname, dpi=300)
 
-    @property
-    def misfit(self) -> float:
+
+    def calculate_misfit(self, solution) -> float:
         """Calculate and return the normalized root mean square misfit."""
         if not hasattr(self, "solution"):
             raise RuntimeError("Run solve() first to compute coefficients.")
-        predicted = self.A @ SphericalHarmonicsUtils.clm_to_vector(self.solution)
+        predicted = self.A @ SphericalHarmonicsUtils.clm_to_vector(solution)
         residuals = self.data.residual - predicted
         misfit = np.sqrt(np.mean((residuals / self.data.error) ** 2))
         return misfit
@@ -157,22 +163,79 @@ class SphericalHarmonicInversion:
         self.power_spectrum = np.zeros(self.l_max)
 
         coeffs = SphericalHarmonicsUtils.clm_to_vector(self.solution)
+
+        fake_coeffs = np.zeros_like(coeffs)
+        idx = 0
+        for l in range(1, self.l_max + 1):
+            for m in range(-l, l + 1):
+                num = f'{l}{abs(m)}'
+                num = int(num)
+                if m < 0:
+                    num = -num
+                fake_coeffs[idx] = num
+
+                idx += 1
+        # print(fake_coeffs)
+
         for l in range(1, self.l_max + 1):
             lower_index = index(l=l, m=-l)
             upper_index = index(l=l, m=l) + 1
+            # print(fake_coeffs[lower_index:upper_index])
             a_l = coeffs[lower_index:upper_index]
             C_l = C_a[lower_index:upper_index, lower_index:upper_index]
-            self.power_spectrum[l - 1] = 1 / (2 * l + 1) * (a_l.T @ a_l - np.trace(C_l))
+            self.power_spectrum[l - 1] = a_l.T @ a_l #+ np.trace(C_l)
+
+        # variance = np.zeros(self.l_max)
+        # for l in range(1, self.l_max + 1):
+        #     lower_index = index(l=l, m=-l)
+        #     upper_index = index(l=l, m=l) + 1
+        #     C_l = C_a[lower_index:upper_index, lower_index:upper_index]
+        #     variance[l - 1] = 2 * np.trace(C_l @ C_l) + 4 * self.power_spectrum.T
         return self.power_spectrum
+
+    def calculate_spectrum_family(self, lambda_norms, lambda_grads):
+        """
+        Compute spectra for a list of damping parameters.
+        Returns an array of shape (len(damping_values), lmax+1).
+        """
+        spectra = []
+        for lambda_norm in lambda_norms:
+            for lambda_grad in lambda_grads:
+                sol = self.solve(lambda_norm=lambda_norm, lambda_grad=lambda_grad)
+                P = self.calculate_power_spectrum()
+                spectra.append(P)
+                print(self.calculate_misfit(sol))
+
+        self.mean_power_spectrum = np.mean(spectra, axis=0)
+        self.power_std = np.std(spectra, axis=0)
+
+        self.power_spectrum_df = pd.DataFrame({
+            'degree': np.arange(1, self.l_max + 1),
+            'mean_power': self.mean_power_spectrum,
+            'lower_dev': self.mean_power_spectrum-self.power_std,
+            'upper_dev': self.mean_power_spectrum+self.power_std
+
+        })
+        # return np.vstack(spectra)
 
     def plot_power_spectrum(self, fname: str = None):
         """Plot the power spectrum."""
-        if not hasattr(self, "power_spectrum"):
-            raise RuntimeError("Run calculate_power_spectrum() first.")
+        if not hasattr(self, "power_std"):
+            raise RuntimeError("Run calculate_spectrum_family() first.")
         print(self.power_spectrum)
         fig = pg.Figure()
         fig.basemap(region=[1, self.l_max, 1e-2, 1e1], projection="X10c/5cl", frame=["WSne", "xaf+lDegree", "yaf+lPower"])
 
-        fig.plot(x=np.arange(1, self.l_max + 1), y=self.power_spectrum, style="c0.2c", fill="blue", label="Power Spectrum")
-
+        # fig.plot(x=np.arange(1, self.l_max + 1), y=self.power_spectrum, style="+0.2c", fill="blue", label="Power Spectrum Manual")
+        # fig.plot(x=np.arange(1, self.l_max + 1), y=self.solution.spectrum(convention='l2norm')[1:], fill="red", style="+0.2c", label="Power Spectrum SHCoeffs")
+        fig.plot(
+            data=self.power_spectrum_df,
+            fill="lightgreen@50",
+            close="+b+p0.5p,lightgreen,dashed",
+            pen="1p,darkgreen",
+        )
+        # fig.plot(x=np.arange(1, self.l_max + 1), y=self.mean_power_spectrum, pen="2p,blue", label="Mean Power Spectrum")
+        # fig.plot(x=np.arange(1, self.l_max + 1), y=self.mean_power_spectrum - self.power_std, pen="1p,blue,dashed")
+        # fig.plot(x=np.arange(1, self.l_max + 1), y=self.mean_power_spectrum + self.power_std, pen="1p,blue,dashed")
         fig.savefig(fname=fname)
+
