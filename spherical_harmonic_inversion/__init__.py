@@ -1,8 +1,9 @@
 from .inversion import (
-    SphericalHarmonicsUtils,
     InversionData,
     SphericalHarmonicInversion,
 )
+
+from .utils import SphericalHarmonicsUtils
 
 __all__ = [
     "SphericalHarmonicsUtils",

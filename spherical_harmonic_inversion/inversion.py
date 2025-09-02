@@ -140,3 +140,39 @@ class SphericalHarmonicInversion:
         residuals = self.data.residual - predicted
         misfit = np.sqrt(np.mean((residuals / self.data.error) ** 2))
         return misfit
+
+    def calculate_power_spectrum(self):
+        """Calculate and return the power spectrum of the solution."""
+        if not hasattr(self, "solution"):
+            raise RuntimeError("Run solve() first to compute coefficients.")
+
+        C_a_inv = self.A.T @ self.C_inv @ self.A
+
+        from scipy.linalg import cho_factor, cho_solve
+
+        c_factor = cho_factor(C_a_inv)
+
+        C_a = cho_solve(c_factor, np.eye(C_a_inv.shape[0]))
+
+        self.power_spectrum = np.zeros(self.l_max)
+
+        coeffs = SphericalHarmonicsUtils.clm_to_vector(self.solution)
+        for l in range(1, self.l_max + 1):
+            lower_index = index(l=l, m=-l)
+            upper_index = index(l=l, m=l) + 1
+            a_l = coeffs[lower_index:upper_index]
+            C_l = C_a[lower_index:upper_index, lower_index:upper_index]
+            self.power_spectrum[l - 1] = 1 / (2 * l + 1) * (a_l.T @ a_l - np.trace(C_l))
+        return self.power_spectrum
+
+    def plot_power_spectrum(self, fname: str = None):
+        """Plot the power spectrum."""
+        if not hasattr(self, "power_spectrum"):
+            raise RuntimeError("Run calculate_power_spectrum() first.")
+        print(self.power_spectrum)
+        fig = pg.Figure()
+        fig.basemap(region=[1, self.l_max, 1e-2, 1e1], projection="X10c/5cl", frame=["WSne", "xaf+lDegree", "yaf+lPower"])
+
+        fig.plot(x=np.arange(1, self.l_max + 1), y=self.power_spectrum, style="c0.2c", fill="blue", label="Power Spectrum")
+
+        fig.savefig(fname=fname)
