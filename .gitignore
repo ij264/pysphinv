@@ -1,0 +1,10 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore local test scripts
+examples/holdt.py
+scratch_*.py
+
+# Ignore image files
+*.png
